@@ -33,6 +33,7 @@ macro_rules! getline {
 #[tokio::main]
 async fn main() -> io::Result<()> {
     // Init io streams
+    #[allow(unused_assignments)]
     let (cin, cout, mut buf) = new_bufio!();
     let (mut cin_lock, _) = init_lockedio!(cin, cout);
 
@@ -50,6 +51,7 @@ async fn main() -> io::Result<()> {
     buf = getline!(cin_lock)?;
     let mut rtsp_connection = match camera {
         RtspCamera::AxisCamera(axis_camera) => axis_camera.establish_rtsp_connection(buf)?,
+        #[allow(unreachable_patterns)]
         _ => panic!("Unsupported camera type!"),
     };
 

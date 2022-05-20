@@ -15,16 +15,16 @@ pub(crate) struct RtspConnection {
     pub(crate) url: String,
     pub(crate) ipaddr: String,
     pub(crate) port: u16,
+    pub(crate) public_methods: String,
     pub(crate) session_id: String,
     pub(crate) authentication: Option<RtspAuthentication>,
 }
 
-
 /// `RtspAuthentication` is a struct with 6 fields, all of which are public, and all of which are
 /// strings.
-/// 
+///
 /// Properties:
-/// 
+///
 /// * `user`: The username to use for authentication.
 /// * `passwd`: The password for the user.
 /// * `realm`: The realm is a string that defines the protection space. If a server wishes to limit
@@ -70,6 +70,7 @@ impl EstablishRtspConnection for AxisCamera {
                 ipaddr,
                 port: 554,
                 session_id: String::new(),
+                public_methods: String::new(),
                 authentication: Some(RtspAuthentication {
                     user,
                     passwd,

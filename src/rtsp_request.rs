@@ -24,13 +24,13 @@ macro_rules! describe_request {
 
 #[macro_export]
 macro_rules! describe_authenticate_request {
-    ($url: expr, $c_seq: expr, $username: expr, $realm: expr, $nonce: expr, $response: expr) => {
+    ($url: expr, $c_seq: expr, $authorization: expr) => {
         format!(
             "DESCRIBE {} RTSP/1.0\r\n
             CSeq: {}\r\n
             User-Agent: rtsp-invitor-1.0\r\n
-            Authorization: Digest username=\"{}\", realm=\"{}\", nonce=\"{}\", uri=\"{}\", response=\"{}\"\r\n\r\n",
-            $url, $c_seq, $username, $realm, $nonce, $url, $response
+            Authorization: {}\r\n",
+            $url, $c_seq, $authorization
         )
     };
 }

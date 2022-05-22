@@ -3,35 +3,44 @@ use crate::{
     rtsp_url_parser::{AxisCamera, EstablishRtspConnection, RtspCamera},
 };
 use sscanf::scanf;
-use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::env;
-use tokio::{io::Interest, net::TcpStream};
+use std::io::{BufRead, BufReader, BufWriter, Write};
+use tokio::{
+    io::{Interest, Result},
+    net::TcpStream,
+};
 
-pub(crate) mod io;
+pub(crate) mod io_macros;
+pub(crate) mod rtsp_frame;
 pub(crate) mod rtsp_machine;
 pub(crate) mod rtsp_request;
 pub(crate) mod rtsp_response;
+pub(crate) mod rtsp_session;
 pub(crate) mod rtsp_url_parser;
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> tokio::io::Result<()> {
     // Init io streams
     #[allow(unused_assignments)]
     let (cin, cout, mut buf) = new_bufio!();
     let (mut cin_lock, _) = init_lockedio!(cin, cout);
 
     // Get input
-    let args = env::args().collect::<Vec<_>>();
-    assert_eq!(args.len(), 5, "Invalid input args! Usage: rtsp_invitor -i <rtsp_url> -o <ip.dst:port>.");
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    assert_eq!(
+        args.len(),
+        4,
+        "Invalid input args! Usage: rtsp_invitor -i <rtsp_url> -o <ip.dst:port>."
+    );
 
     // Parse input
-    args.as_slice().windows(2)
+    args.as_slice()
+        .windows(2)
         .for_each(|input| match input[0].as_str() {
             "-i" => {}
             "-o" => {}
             _ => panic!("Invalid input args! Usage: rtsp_invitor -i <rtsp_url> -o <ip.dst:port>."),
         });
-    
 
     // Get camera type
     // println!("Please input the camera type: (str, default Axis)");

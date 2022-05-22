@@ -38,14 +38,15 @@ impl RtspMachine {
                         ))
                     );
 
-                    describe_authenticate_request!(
-                        self.rtsp_connection.url,
-                        c_seq,
-                        auth.user,
-                        auth.realm,
-                        auth.nonce,
-                        auth.response
-                    )
+                    // describe_authenticate_request!(
+                    //     self.rtsp_connection.url,
+                    //     c_seq,
+                    //     auth.user,
+                    //     auth.realm,
+                    //     auth.nonce,
+                    //     auth.response
+                    // )
+                    todo!()
                 } else {
                     panic!("Authentication information not found, please check the URL!");
                 }

@@ -5,6 +5,7 @@ use bytes::{BytesMut, Buf};
 use tokio::io::{AsyncReadExt, Error, ErrorKind, Result, AsyncWriteExt};
 use tokio::net::TcpStream;
 
+#[derive(Debug)]
 pub(crate) struct RtspSession {
     pub(crate) stream: TcpStream,
     pub(crate) buf: BytesMut,

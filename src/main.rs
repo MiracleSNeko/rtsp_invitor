@@ -1,147 +1,137 @@
-use crate::{
-    rtsp_machine::RtspState,
-    rtsp_url_parser::{AxisCamera, EstablishRtspConnection, RtspCamera},
-};
-use sscanf::scanf;
-use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::env;
-use tokio::{io::Interest, net::TcpStream};
+use crate::rtsp_machine::RtspMachine;
+use std::io::{BufRead, BufReader, BufWriter};
+use std::{collections::HashMap, env};
 
-pub(crate) mod io;
+pub(crate) mod io_macros;
+pub(crate) mod rtsp_camera;
+pub(crate) mod rtsp_frame;
 pub(crate) mod rtsp_machine;
 pub(crate) mod rtsp_request;
-pub(crate) mod rtsp_response;
-pub(crate) mod rtsp_url_parser;
+pub(crate) mod rtsp_session;
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> tokio::io::Result<()> {
     // Init io streams
     #[allow(unused_assignments)]
     let (cin, cout, mut buf) = new_bufio!();
     let (mut cin_lock, _) = init_lockedio!(cin, cout);
 
     // Get input
-    let args = env::args().collect::<Vec<_>>();
-    assert_eq!(args.len(), 5, "Invalid input args! Usage: rtsp_invitor -i <rtsp_url> -o <ip.dst:port>.");
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    assert_eq!(
+        args.len(),
+        6,
+        "Invalid input args! Usage: rtsp_invitor -url/-u <rtsp_url> -port/-p <rtsp_port:rtp_port> -camera/-c <camera>."
+    );
 
     // Parse input
-    args.as_slice().windows(2)
-        .for_each(|input| match input[0].as_str() {
-            "-i" => {}
-            "-o" => {}
-            _ => panic!("Invalid input args! Usage: rtsp_invitor -i <rtsp_url> -o <ip.dst:port>."),
+    let mut inputs = HashMap::new();
+    args.as_slice()
+        .windows(2)
+        .step_by(2)
+        .for_each(|input| {
+            match input[0].as_str() {
+                "-url" | "-u" => {
+                    inputs.insert(String::from("Url"), input[1].clone());
+                }
+                "-port" | "-p" => {
+                    inputs.insert(String::from("Port"), input[1].clone());
+                }
+                "-camera" | "-c" => {
+                    inputs.insert(String::from("Camera"), input[1].clone());
+                }
+                _ => panic!("Invalid input args {}: {}! Usage: rtsp_invitor -url/-u <rtsp_url> -port/-p <rtsp_port:rtp_port> -camera/-c <camera>.", &input[0], &input[1]),
+            }
         });
-    
 
-    // Get camera type
-    // println!("Please input the camera type: (str, default Axis)");
-    // buf = getline!(cin_lock)?;
-    // let camera_type = scanf!(buf, "{String}").unwrap_or(String::from("Axis"));
-    // let camera = match camera_type.as_str() {
-    //     "Axis" => RtspCamera::AxisCamera(AxisCamera {}),
-    //     _ => panic!("Unsupported camera type!"),
-    // };
+    // Create rtsp machine
+    let mut rtsp_machine = RtspMachine::new(&inputs).await?;
 
-    // // Parse input rtsp url
-    // println!("Please enter the RTSP URL of the camera: (str)");
-    // buf = getline!(cin_lock)?;
-    // let mut rtsp_connection = match camera {
-    //     RtspCamera::AxisCamera(axis_camera) => axis_camera.establish_rtsp_connection(buf)?,
-    //     #[allow(unreachable_patterns)]
-    //     _ => panic!("Unsupported camera type!"),
-    // };
+    // Start rtsp machine
+    let mut c_seq = 1;
+    let mut repeat_request = 0;
+    let mut repeat_response = 0;
+    loop {
+        // Send request
+        let request = rtsp_machine.process_request(c_seq).await;
 
-    // // Get target camera's RTSP port
-    // println!("Please enter the RTSP port of the camera: (u16, default 554)");
-    // buf = getline!(cin_lock)?;
-    // let rtsp_port = scanf!(buf, "{u16}").unwrap_or(554);
-    // rtsp_connection.port = rtsp_port;
+        // Check if request is send successfully
+        match request {
+            Ok(result) => {
+                repeat_request = 0;
+                // Break the loop and waiting for exit
+                if !result {
+                    break;
+                }
+            }
+            Err(ref err) => {
+                println!("Send request failed with error: {:?}, try again!", err);
+                repeat_request += 1;
+                if repeat_request >= 3 {
+                    return Err(tokio::io::Error::new(
+                        tokio::io::ErrorKind::Other,
+                        "Send request failed after 3-times retry!",
+                    ));
+                }
+                /* Send request failed, try again. */
+                continue;
+            }
+        }
 
-    // // Assembly RTSP machine
-    // let mut rtsp_state = RtspState::Starting;
+        // Clear buffer
+        rtsp_machine.clear_buf();
 
-    // // Get target RTP port
-    // println!("Please enter the target RTP port: (u16)");
-    // buf = getline!(cin_lock)?;
-    // let rtp_dst_port = scanf!(buf, "{u16}").unwrap();
+        // Recv response
+        let response = rtsp_machine.process_response(c_seq).await;
 
-    // // Establish tcp connection to RTSP server (camera)
-    // println!("Establishing RTSP connection...");
-    // let tcp_stream = TcpStream::connect(format!(
-    //     "{}:{}",
-    //     rtsp_connection.ipaddr, rtsp_connection.port
-    // ))
-    // .await?;
+        // Check if response is recv successfully
+        match response {
+            Ok(c_seq_resp) => {
+                repeat_response = 0;
+                match c_seq_resp {
+                    0 => { /* Recv response failed, send request again. */ }
+                    _ => {
+                        if c_seq_resp == c_seq + 1 {
+                            // Recv response successfully
+                            c_seq = c_seq_resp;
+                        } else {
+                            // CSeq mismatch, throw error
+                            return Err(tokio::io::Error::new(
+                                tokio::io::ErrorKind::Other,
+                                "CSeq mismatch!",
+                            ));
+                        }
+                    }
+                }
+            }
+            Err(ref err) => {
+                repeat_response += 1;
+                println!("Recv response failed with error: {:?}, try again!", err);
+                if repeat_response >= 3 {
+                    return Err(tokio::io::Error::new(
+                        tokio::io::ErrorKind::Other,
+                        "Recv response failed after 3-times retry!",
+                    ));
+                }
+                continue;
+            }
+        }
 
-    // // Send RTSP request and receive RTSP response
-    // let mut c_seq = 1;
-    // loop {
-    //     let ready = tcp_stream
-    //         .ready(Interest::WRITABLE | Interest::READABLE)
-    //         .await?;
+        // Clear buffer
+        rtsp_machine.clear_buf();
+    }
 
-    //     // Send RTSP request
-    //     if ready.is_writable() {}
+    println!("rtsp-invitor is done!");
 
-    //     // Recv RTSP response
-    //     if ready.is_readable() {}
-    // }
-
-    // // waiting for console input to stop RTP stream
-    // println!("Enter \"exit\" to stop RTP stream...");
-    // loop {
-    //     buf = getline!(cin_lock)?;
-    //     if buf == "exit" {
-    //         break;
-    //     } else {
-    //         println!("Enter \"exit\" to stop RTP stream...");
-    //         continue;
-    //     }
-    // }
-
-    // // Send TEARDOWN request and receive TEARDOWN response
-    // loop {
-    //     let ready = tcp_stream
-    //         .ready(Interest::WRITABLE | Interest::READABLE)
-    //         .await?;
-
-    //     // Send TEARDOWN request
-    //     if ready.is_writable() && rtsp_state == RtspState::PlayRecv {
-    //         let request = teardown_request!(rtsp_connection.url, c_seq, rtsp_connection.session_id);
-    //         println!("Sending request: {}", request);
-    //         match tcp_stream.try_write(request.as_bytes()) {
-    //             Ok(_) => {
-    //                 rtsp_state = RtspState::Exiting;
-    //             }
-    //             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-    //                 continue;
-    //             }
-    //             Err(ref e) => {
-    //                 return Err(io::Error::new(e.kind(), format!("{}", e)));
-    //             }
-    //         }
-    //     }
-
-    //     // Recv TEARDOWN response
-    //     if ready.is_readable() && rtsp_state == RtspState::Exiting {
-    //         let mut buff = [0_u8; 1500]; // pre-allocate 1500 bytes (MTU of ethernet)
-    //         match tcp_stream.try_read(&mut buff) {
-    //             Ok(len) => {
-    //                 println!(
-    //                     "Received response: {}",
-    //                     String::from_utf8_lossy(&buff[..len])
-    //                 );
-    //                 break;
-    //             }
-    //             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-    //                 continue;
-    //             }
-    //             Err(ref e) => {
-    //                 return Err(io::Error::new(e.kind(), format!("{}", e)));
-    //             }
-    //         }
-    //     }
-    // }
+    // Close rtsp machine when `exit` entered
+    loop {
+        println!("Enter `exit` to exit rtsp-invitor...");
+        buf = getline!(cin_lock).unwrap_or_default();
+        if buf.trim() == "exit" {
+            rtsp_machine.shut_down(c_seq).await?;
+            break;
+        }
+    }
 
     // Exit
     Ok(())
